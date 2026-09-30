@@ -53,7 +53,7 @@ Or arm a single rule from inside an agent pane without any config file:
 ```bash
 herdr-bridge start
 herdr-bridge arm --name workers \
-  --agent 'worker-*' --status done --status idle --status blocked \
+  --agent 'worker-*' --status done --status blocked \
   --message 'worker {name} ({pane_id}) is {status}'
 ```
 

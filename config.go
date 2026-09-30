@@ -51,6 +51,7 @@ type Rule struct {
 	Enabled            *bool  `json:"enabled,omitempty"`
 	Watch              Watch  `json:"watch"`
 	Target             string `json:"target"`            // pane id, live agent name, or "self"
+	Owner              string `json:"owner,omitempty"`   // pane that armed the rule; guards take-over
 	Mode               string `json:"mode,omitempty"`    // prompt | type | notify
 	Message            string `json:"message,omitempty"` // template
 	CoalesceMS         *int   `json:"coalesce_ms,omitempty"`
@@ -97,7 +98,7 @@ const (
 	modePrompt         = "prompt"
 	modeType           = "type"
 	modeNotify         = "notify"
-	defaultStatusesCSV = "done,idle,blocked"
+	defaultStatusesCSV = "done,blocked"
 )
 
 var validStatuses = map[string]bool{
@@ -297,6 +298,34 @@ func (c *Config) SocketPathOr() string {
 // RuntimeRulePath returns the file path for a runtime rule name.
 func RuntimeRulePath(stateDir, name string) string {
 	return filepath.Join(stateDir, "rules", name+".json")
+}
+
+// readRuleOwner returns the pane that armed the named rule, "" when the file
+// does not record one, and ok=false when it cannot be read or parsed.
+func readRuleOwner(path, name string) (owner string, ok bool) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", false
+	}
+	var single Rule
+	if err := json.Unmarshal(data, &single); err == nil && single.Name != "" {
+		if single.Name == name {
+			return single.Owner, true
+		}
+		return "", false
+	}
+	var multi struct {
+		Rules []Rule `json:"rules"`
+	}
+	if err := json.Unmarshal(data, &multi); err != nil {
+		return "", false
+	}
+	for _, r := range multi.Rules {
+		if r.Name == name {
+			return r.Owner, true
+		}
+	}
+	return "", false
 }
 
 // LoadRuntimeRules reads rules written by `herdr-bridge arm`.

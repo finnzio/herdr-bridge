@@ -426,6 +426,10 @@ func cmdCheck(args []string) int {
 		}
 		fmt.Printf("rule %-20s mode=%s watch[%s] target=%s\n", r.Name, r.Mode, selectorNote, targetNote)
 	}
+	for _, c := range watchConflicts(rules, probe.agents) {
+		fmt.Printf("WARNING pane %s is watched by rules with different targets: %s\n",
+			c.Pane, strings.Join(c.Rules, ", "))
+	}
 	if failed {
 		return 1
 	}
@@ -483,7 +487,7 @@ func cmdArm(args []string) int {
 	fs.Var(&kinds, "kind", "watch agent kind, e.g. codex (repeatable)")
 	fs.Var(&panes, "pane", "watch exact pane id (repeatable)")
 	fs.Var(&workspaces, "workspace", "watch workspace id (repeatable)")
-	fs.Var(&statuses, "status", "watch agent status: done|idle|blocked|working|unknown (repeatable)")
+	fs.Var(&statuses, "status", "watch agent status: done|blocked|idle|working|unknown (repeatable, default done,blocked)")
 	matchPane := fs.String("match-pane", "", "watch pane output on this pane id")
 	matchRe := fs.String("match-regex", "", "output match regex")
 	matchSub := fs.String("match-substring", "", "output match literal substring")
@@ -493,6 +497,7 @@ func cmdArm(args []string) int {
 	coalesce := fs.Int("coalesce-ms", 0, "coalesce window override")
 	rate := fs.Int("rate-limit", 0, "max deliveries per minute for this target")
 	replace := fs.Bool("replace", false, "overwrite an existing rule with the same name")
+	force := fs.Bool("force", false, "with --replace, take over a rule armed by another pane")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -506,14 +511,14 @@ func cmdArm(args []string) int {
 	}
 	// Capture the caller before writing the rule. The shared daemon may have
 	// been started from a different pane (or without any pane environment).
+	callerPane := os.Getenv("HERDR_PANE_ID")
 	resolvedTarget := *target
 	if resolvedTarget == "self" {
-		pane := os.Getenv("HERDR_PANE_ID")
-		if pane == "" {
+		if callerPane == "" {
 			fmt.Fprintln(os.Stderr, "herdr-bridge arm: default target / --target self needs HERDR_PANE_ID; run inside a Herdr pane or specify --target <pane-id|agent-name>")
 			return 1
 		}
-		resolvedTarget = pane
+		resolvedTarget = callerPane
 	}
 	cfg := loadConfigOrDie(*configPath)
 	state := NewState(cfg.StateDir)
@@ -523,14 +528,23 @@ func cmdArm(args []string) int {
 	}
 
 	path := RuntimeRulePath(cfg.StateDir, *name)
-	if _, err := os.Stat(path); err == nil && !*replace {
-		fmt.Fprintf(os.Stderr, "herdr-bridge arm: rule %q already exists at %s (use --replace)\n", *name, path)
-		return 1
+	if _, err := os.Stat(path); err == nil {
+		if !*replace {
+			fmt.Fprintf(os.Stderr, "herdr-bridge arm: rule %q already exists at %s (use --replace)\n", *name, path)
+			return 1
+		}
+		// A rule armed from another pane belongs to that pane. Taking it over
+		// silently would route that pane's notifications here instead.
+		if owner, ok := readRuleOwner(path, *name); ok && owner != "" && owner != callerPane && !*force {
+			fmt.Fprintf(os.Stderr, "herdr-bridge arm: rule %q is owned by pane %s; use a different --name, or --replace --force to take it over\n", *name, owner)
+			return 1
+		}
 	}
 
 	rule := Rule{
 		Name:    *name,
 		Target:  resolvedTarget,
+		Owner:   callerPane,
 		Mode:    *mode,
 		Message: *message,
 		Watch: Watch{
@@ -669,8 +683,12 @@ func cmdRules(args []string) int {
 		if !r.EnabledNow() {
 			status = "disabled"
 		}
-		fmt.Printf("%-20s %-8s mode=%-6s target=%-12s %s (%s)\n",
-			r.Name, status, r.Mode, r.Target, describeWatch(r.Watch), originLabel(r.Origin))
+		owner := ""
+		if r.Owner != "" {
+			owner = " owner=" + r.Owner
+		}
+		fmt.Printf("%-20s %-8s mode=%-6s target=%-12s%s %s (%s)\n",
+			r.Name, status, r.Mode, r.Target, owner, describeWatch(r.Watch), originLabel(r.Origin))
 	}
 	return 0
 }

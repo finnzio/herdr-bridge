@@ -211,6 +211,10 @@ func (e *Engine) session(ctx context.Context) error {
 	if err := e.reconcile(plan); err != nil {
 		e.log.Warn("state reconcile failed", "err", err.Error())
 	}
+	for _, c := range watchConflicts(e.rules, e.agents) {
+		e.log.Warn("pane watched by rules with different targets",
+			"pane", c.Pane, "watchers", strings.Join(c.Rules, ", "))
+	}
 	e.probePreMatching(plan)
 	if reconnected && e.cfg.Defaults.ReconnectNotice != nil && *e.cfg.Defaults.ReconnectNotice {
 		e.waker.NotifyBridge("herdr-bridge reconnected",
@@ -727,18 +731,29 @@ func (e *Engine) pollInterval() time.Duration {
 	return time.Duration(ms) * time.Millisecond
 }
 
+// configChanged reports whether a watched file appeared, disappeared, or was
+// modified since the last reload. A file that never existed is not a change:
+// the config file is optional, and treating its absence as a change made the
+// daemon reload on every tick.
 func (e *Engine) configChanged() bool {
 	files := ConfigFilesForWatch(e.cfg)
-	if len(files) != len(e.configMtimes) {
-		return true
-	}
+	current := make(map[string]bool, len(files))
 	for _, f := range files {
-		mt, ok := e.configMtimes[f]
-		if !ok {
+		current[f] = true
+		info, err := os.Stat(f)
+		mt, watched := e.configMtimes[f]
+		switch {
+		case err != nil:
+			if watched {
+				return true
+			}
+		case !watched || !info.ModTime().Equal(mt):
 			return true
 		}
-		info, err := os.Stat(f)
-		if err != nil || !info.ModTime().Equal(mt) {
+	}
+	// A watched file that no longer shows up in the listing was removed.
+	for f := range e.configMtimes {
+		if !current[f] {
 			return true
 		}
 	}
@@ -752,6 +767,68 @@ func fileMTimes(files []string) map[string]time.Time {
 			out[f] = info.ModTime()
 		}
 	}
+	return out
+}
+
+// watchConflict is one pane that several rules watch with different wake
+// targets, so a single event would wake more than one initiator.
+type watchConflict struct {
+	Pane  string
+	Rules []string // "<rule> -> <target>", sorted
+}
+
+// watchConflicts lists panes watched by more than one enabled rule whose
+// resolved targets differ. It is the signal that two initiators grabbed the
+// same worker; the fix is one owner per pane.
+func watchConflicts(rules []Rule, agents map[string]AgentInfo) []watchConflict {
+	byName := map[string]string{}
+	for _, a := range agents {
+		if n := a.AgentName(); n != "" {
+			byName[n] = a.PaneID
+		}
+	}
+	resolve := func(target string) string {
+		if target == "self" {
+			return "self"
+		}
+		if paneIDRe.MatchString(target) {
+			return target
+		}
+		if pane, ok := byName[target]; ok {
+			return pane
+		}
+		return target
+	}
+
+	entries := map[string][]string{}
+	targets := map[string]map[string]bool{}
+	for i := range rules {
+		r := &rules[i]
+		if !r.EnabledNow() {
+			continue
+		}
+		for _, a := range agents {
+			if !watchMatchesAgent(&r.Watch, a) {
+				continue
+			}
+			entries[a.PaneID] = append(entries[a.PaneID], fmt.Sprintf("%s -> %s", r.Name, r.Target))
+			if targets[a.PaneID] == nil {
+				targets[a.PaneID] = map[string]bool{}
+			}
+			targets[a.PaneID][resolve(r.Target)] = true
+		}
+	}
+
+	out := []watchConflict{}
+	for pane, set := range targets {
+		if len(set) < 2 {
+			continue
+		}
+		watchers := entries[pane]
+		sort.Strings(watchers)
+		out = append(out, watchConflict{Pane: pane, Rules: watchers})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Pane < out[j].Pane })
 	return out
 }
 

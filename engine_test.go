@@ -215,6 +215,32 @@ func TestBaselineIsSilentAndRepeatedStatusIgnored(t *testing.T) {
 	}
 }
 
+func TestIdleIsNotWatchedByDefault(t *testing.T) {
+	fake := newFakeHerdr(t)
+	fake.setAgents(
+		testAgent("w1:p2", "codex", "working", "worker"),
+		testAgent("w1:p1", "claude", "idle", "supervisor"),
+	)
+	fake.setPanes(testPane("w1:p1"), testPane("w1:p2"))
+	startEngine(t, fake, []map[string]any{{
+		"name":   "workers",
+		"watch":  map[string]any{"kinds": []string{"codex"}},
+		"target": "w1:p1",
+	}}, nil)
+	waitForSubscribe(t, fake, 1)
+
+	fake.setAgentStatus("w1:p2", "idle")
+	fake.Push("pane.agent_status_changed", map[string]any{"pane_id": "w1:p2", "agent_status": "idle"})
+	time.Sleep(300 * time.Millisecond)
+	if n := fake.promptCount(); n != 0 {
+		t.Fatalf("idle transition produced %d prompt(s); want 0", n)
+	}
+
+	fake.setAgentStatus("w1:p2", "blocked")
+	fake.Push("pane.agent_status_changed", map[string]any{"pane_id": "w1:p2", "agent_status": "blocked"})
+	waitFor(t, 3*time.Second, "prompt on blocked", func() bool { return fake.promptCount() == 1 })
+}
+
 func TestCaughtUpStateChangeAfterRestart(t *testing.T) {
 	fake := newFakeHerdr(t)
 	fake.setAgents(testAgent("w1:p2", "codex", "done", "worker"))
@@ -602,6 +628,96 @@ func TestReloadsRulesWhenConfigChanges(t *testing.T) {
 		}
 		return false
 	})
+}
+
+func TestMissingConfigFileDoesNotTriggerReloadLoop(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", dir)
+	cfgPath := filepath.Join(dir, "config.json") // never created
+	cfg, err := LoadConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	engine := NewEngine(cfg, NewClient(cfg.SocketPathOr()), NewState(cfg.StateDir), NewLogger(&testLogger{}, LevelError), true)
+	if err := engine.reload(); err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if engine.configChanged() {
+		t.Fatal("absent config file reported as changed; the daemon would reload every tick")
+	}
+
+	// A rule armed while the daemon runs must still be picked up.
+	rulePath := RuntimeRulePath(cfg.StateDir, "armed")
+	if err := os.MkdirAll(filepath.Dir(rulePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rulePath, []byte(`{"name":"armed","target":"w1:p1","watch":{"panes":["w1:p2"]}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !engine.configChanged() {
+		t.Fatal("new runtime rule not detected")
+	}
+	if err := engine.reload(); err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if engine.configChanged() {
+		t.Fatal("unchanged runtime rule reported as changed")
+	}
+
+	// Disarming a rule must be noticed too.
+	if err := os.Remove(rulePath); err != nil {
+		t.Fatal(err)
+	}
+	if !engine.configChanged() {
+		t.Fatal("removed runtime rule not detected")
+	}
+
+	// A config file created after startup is still detected.
+	if err := os.WriteFile(cfgPath, []byte(`{"rules":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !engine.configChanged() {
+		t.Fatal("config file created after startup not detected")
+	}
+}
+
+func TestWatchConflicts(t *testing.T) {
+	agents := map[string]AgentInfo{
+		"w1:p1": testAgent("w1:p1", "claude", "idle", "lead"),
+		"w1:p2": testAgent("w1:p2", "codex", "working", "worker-a"),
+		"w1:p3": testAgent("w1:p3", "codex", "working", "worker-b"),
+	}
+	paneRule := func(name, target string, panes ...string) Rule {
+		return Rule{Name: name, Target: target, Watch: Watch{Panes: panes, Statuses: []string{"done", "blocked"}}}
+	}
+
+	// Two initiators watching the same worker pane: the event wakes both.
+	got := watchConflicts([]Rule{
+		paneRule("codex-wait", "w1:p1", "w1:p2"),
+		paneRule("claude-wait", "w1:p9", "w1:p2"),
+	}, agents)
+	if len(got) != 1 || got[0].Pane != "w1:p2" || len(got[0].Rules) != 2 {
+		t.Fatalf("conflicts = %+v, want one conflict on w1:p2 with two watchers", got)
+	}
+	if got[0].Rules[0] != "claude-wait -> w1:p9" || got[0].Rules[1] != "codex-wait -> w1:p1" {
+		t.Errorf("watcher list = %v", got[0].Rules)
+	}
+
+	// The same target written as a pane id and as an agent name is not a conflict.
+	byName := []Rule{
+		paneRule("codex-wait", "w1:p1", "w1:p2", "w1:p3"),
+		paneRule("lead-wait", "lead", "w1:p2", "w1:p3"),
+	}
+	if got := watchConflicts(byName, agents); len(got) != 0 {
+		t.Errorf("same resolved target reported as a conflict: %+v", got)
+	}
+
+	// A disabled rule does not participate.
+	disabled := paneRule("codex-wait", "w1:p1", "w1:p2")
+	disabled.Enabled = boolPtr(false)
+	if got := watchConflicts([]Rule{disabled, paneRule("claude-wait", "w1:p9", "w1:p2")}, agents); len(got) != 0 {
+		t.Errorf("disabled rule reported as a conflict: %+v", got)
+	}
 }
 
 func TestSelfTargetResolvesThroughEnvironment(t *testing.T) {

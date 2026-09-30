@@ -91,7 +91,8 @@ No configuration file is required.
 # Discover the worker's actual pane ID.
 herdr agent list
 
-# Replace w1:p2 with that ID. The default states are done, idle, and blocked.
+# Replace w1:p2 with that ID. The default states are done and blocked:
+# completion, or a worker that stopped and needs attention.
 herdr-bridge arm --name worker-finished --pane w1:p2
 
 # Validate the armed rule against the live Herdr session.
@@ -122,9 +123,36 @@ config rules, `"target": "self"` uses the **daemon's** environment, so use a
 concrete pane ID or agent name there.
 
 Rule names are shared within a state directory. Use distinct names for
-independent waits; `--replace` intentionally overwrites a rule with that name.
-If a target pane moves, closes, or hosts a different agent, inspect the live
-session and re-arm the rule. Rules bind to panes, not persistent conversations.
+independent waits; `--replace` intentionally overwrites a rule with that name,
+and refuses to take over a rule armed by another pane unless you also pass
+`--force`. If a target pane moves, closes, or hosts a different agent, inspect
+the live session and re-arm the rule. Rules bind to panes, not persistent
+conversations.
+
+### One owner per worker pane
+
+Herdr does not record which pane asked a worker to do something, so the bridge
+cannot infer the initiator: routing comes from the rule's stored `target` and
+from which panes the rule watches. Two waiters on the same worker therefore both
+get woken, and two agents arming the same rule name fight over the file.
+
+- Name rules after the waiter and the work, e.g. `import-flow-claude-p4`; never
+  reuse a task-global name like `workers` across two initiators.
+- Watch exactly the panes you started (`--pane w1B:p4`) or agent names only you
+  use. Give workers unique names with `herdr agent rename <pane> <name>` if a
+  kind-wide selector would otherwise match someone else's worker.
+- Do not arm a rule that watches another initiator's pane; let that initiator
+  notify upward instead.
+- `herdr-bridge rules` prints `owner=<pane>` for every armed rule, and
+  `herdr-bridge check` warns when one pane is watched by rules with different
+  targets:
+
+  ```
+  WARNING pane w1B:p4 is watched by rules with different targets: claude-p4 -> w1B:pF, codex-p4 -> w1B:p1
+  ```
+
+  The daemon logs the same warning when it (re)subscribes, so `herdr-bridge logs`
+  shows the collision without running `check`.
 
 Sending a task with `herdr agent prompt` does not automatically register a
 bridge wait. The sender must also run `herdr-bridge arm`.
@@ -164,8 +192,16 @@ lifecycle state. The bridge consumes Herdr's resulting states and events;
 hooks do not identify who requested a particular wait. That relationship is
 stored by `arm`. No changes to Herdr-managed hook scripts are needed.
 
-Keep `idle` in the watched states for agents that report completion that way.
-The default `done,idle,blocked` covers both completion and requests for input.
+The default watched states are `done` and `blocked`: completion, or a worker
+that stopped and needs attention. `idle` is deliberately not watched — it also
+fires every time a worker settles between turns. Add it explicitly for agents
+that report completion that way:
+
+```bash
+herdr-bridge arm --name worker-finished --pane w1:p2 \
+  --status done --status blocked --status idle
+```
+
 `blocked` means the worker needs attention, not that it completed successfully.
 
 ## Common waits
@@ -253,7 +289,7 @@ A minimal rule is:
   "name": "workers",
   "watch": {
     "panes": ["w1:p2", "w1:p3"],
-    "statuses": ["done", "idle", "blocked"]
+    "statuses": ["done", "blocked"]
   },
   "target": "w1:p1",
   "mode": "prompt",

@@ -5,6 +5,7 @@ import (
 
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 )
@@ -102,8 +103,8 @@ func TestConfigDefaultsAreAppliedToRules(t *testing.T) {
 	if *r.CoalesceMS != 250 || *r.RateLimitPerMinute != 3 {
 		t.Errorf("defaults not applied: %+v", r)
 	}
-	if len(r.Watch.Statuses) != 3 {
-		t.Errorf("statuses = %v, want the three default states", r.Watch.Statuses)
+	if want := []string{"done", "blocked"}; !slices.Equal(r.Watch.Statuses, want) {
+		t.Errorf("statuses = %v, want %v", r.Watch.Statuses, want)
 	}
 	if r.Message != defaultMessage {
 		t.Errorf("message = %q, want the default template", r.Message)

@@ -34,9 +34,18 @@ Herdr socket and prompts your pane only when something actually happened.
    `--target <pane-id|agent-name>` when another recipient is intended. Outside
    Herdr a target is required. If your pane is replaced, re-arm. Rule names
    are shared: choose distinct names for independent waits from different panes.
-4. **Do not watch your own pane when targeting it** —
+4. **One owner per worker pane.** Herdr does not record who asked a worker to
+   run something, so a worker pane can only have one waiter. Watch exactly the
+   panes *you* started (`--pane w1B:p4`) or agent names only you use
+   (`herdr agent rename`), never a kind-wide selector that also covers another
+   orchestrator's workers. `arm --replace` refuses to overwrite a rule armed by
+   another pane unless you pass `--force`; the rule file stores
+   `owner=<pane>`. `herdr-bridge check` and the daemon log warn when one pane is
+   watched by rules with different targets — that warning is the cross-wake bug,
+   not a style nit.
+5. **Do not watch your own pane when targeting it** —
    the bridge drops self-referential events to prevent wake loops.
-5. **Validate the armed wait:** after `arm`, run `herdr-bridge check` before
+6. **Validate the armed wait:** after `arm`, run `herdr-bridge check` before
    submitting work or ending the turn. It must exit 0: it resolves the stored
    rules against the live session and confirms Herdr accepts the subscriptions.
 
@@ -45,7 +54,7 @@ Herdr socket and prompts your pane only when something actually happened.
 ```bash
 herdr-bridge status || herdr-bridge start          # daemon must run
 herdr-bridge arm --name <rule> \
-  --agent 'worker-*' --status done --status idle --status blocked \
+  --agent 'worker-*' --status done --status blocked \
   --message 'worker {name} ({pane_id}) is {status}; {title}'
 herdr-bridge check
 ```
@@ -53,13 +62,14 @@ herdr-bridge check
 Selector flags: `--agent <name|glob>` (repeatable),
 `--kind <codex|claude|grok|cursor|devin|omp|agy>`
 (repeatable), `--pane <w1:p2>` (repeatable), `--workspace <w1>`, `--status`
-(repeatable, default `done,idle,blocked`), plus output watches with
+(repeatable, default `done,blocked`), plus output watches with
 `--match-pane <id> --match-regex '<re>'` or `--match-substring <text>`, and
 `--pane-exited`.
 
 Use Herdr's `cursor` kind for Cursor's `agent` CLI and `omp` for Oh My Pi.
-Keep `idle` among the watched settled states when waiting for hook-based
-agents such as OMP; the default statuses include it.
+The default statuses are `done` and `blocked`. `idle` also fires every time a
+worker settles between turns, so add `--status idle` explicitly only for
+agents such as OMP that report completion that way.
 
 Delivery: `--mode prompt` (default, wakes an agent pane), `--mode type` (raw
 input into any pane), `--mode notify` (Herdr notification only). Tuning:
@@ -70,7 +80,7 @@ Typical orchestrator rule set:
 ```bash
 # any of my workers settling
 herdr-bridge arm --name fleet \
-  --pane w1:p2 --pane w1:p3 --status done --status idle --status blocked --replace
+  --pane w1:p2 --pane w1:p3 --status done --status blocked --replace
 
 # a log marker in a build pane
 herdr-bridge arm --name build-log \

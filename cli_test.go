@@ -57,6 +57,43 @@ func TestArmCapturesCallerAndAllowsTargetOverride(t *testing.T) {
 	}
 }
 
+func TestArmRefusesToTakeOverAnotherPanesRule(t *testing.T) {
+	stateDir := filepath.Join(t.TempDir(), "state")
+	cfgPath := writeTestConfig(t, map[string]any{"state_dir": stateDir})
+	rulePath := filepath.Join(stateDir, "rules", "wait.json")
+	arm := func(pane string, extra ...string) int {
+		t.Setenv("HERDR_PANE_ID", pane)
+		args := append([]string{"--config", cfgPath, "--name", "wait", "--pane", "w1:p2"}, extra...)
+		return cmdArm(args)
+	}
+
+	if code := arm("w1:p1"); code != 0 {
+		t.Fatalf("first arm returned %d", code)
+	}
+	if owner, ok := readRuleOwner(rulePath, "wait"); !ok || owner != "w1:p1" {
+		t.Fatalf("stored owner = %q (ok=%v), want w1:p1", owner, ok)
+	}
+
+	if code := arm("w1:p9", "--replace"); code == 0 {
+		t.Fatal("--replace from another pane overwrote the rule; want refusal")
+	}
+	if owner, _ := readRuleOwner(rulePath, "wait"); owner != "w1:p1" {
+		t.Fatalf("refused arm still changed the owner to %q", owner)
+	}
+
+	if code := arm("w1:p9", "--replace", "--force"); code != 0 {
+		t.Fatalf("forced take-over returned %d", code)
+	}
+	if owner, _ := readRuleOwner(rulePath, "wait"); owner != "w1:p9" {
+		t.Fatalf("owner after force = %q, want w1:p9", owner)
+	}
+
+	// Re-arming from the owner keeps working without --force.
+	if code := arm("w1:p9", "--replace"); code != 0 {
+		t.Fatalf("owner re-arm returned %d", code)
+	}
+}
+
 func TestArmedEventsReturnToEachInitiator(t *testing.T) {
 	fake := newFakeHerdr(t)
 	kinds := []string{"codex", "claude", "grok", "cursor", "devin", "omp", "agy"}
@@ -92,7 +129,7 @@ func TestArmedEventsReturnToEachInitiator(t *testing.T) {
 	t.Setenv("HERDR_PANE_ID", "w1:pZ")
 	startEngineInDir(t, fake, dir, nil, nil)
 	waitForSubscribe(t, fake, 1)
-	statuses := []string{"done", "idle", "blocked"}
+	statuses := []string{"done", "blocked"}
 	for i, worker := range workers {
 		status := statuses[i%len(statuses)]
 		fake.setAgentStatus(worker, status)
