@@ -1,0 +1,36 @@
+id = "herdr-bridge"
+name = "Herdr Bridge"
+version = "0.1.0"
+min_herdr_version = "0.9.0"
+description = "Wake a pane when Herdr events happen; no model is involved while waiting."
+platforms = ["linux", "macos"]
+
+# Start the daemon when Herdr restores a session and the bridge is not already
+# running. The hook is one-shot; the daemon itself keeps running.
+[[startup]]
+command = ["sh", "bin/ensure-daemon.sh"]
+platforms = ["linux", "macos"]
+
+[[actions]]
+id = "start"
+title = "Bridge: start"
+contexts = ["workspace"]
+command = ["sh", "bin/bridge-ctl.sh", "start"]
+
+[[actions]]
+id = "stop"
+title = "Bridge: stop"
+contexts = ["workspace"]
+command = ["sh", "bin/bridge-ctl.sh", "stop"]
+
+[[actions]]
+id = "status"
+title = "Bridge: status"
+contexts = ["workspace"]
+command = ["sh", "bin/bridge-ctl.sh", "status"]
+
+[[actions]]
+id = "rules"
+title = "Bridge: list rules"
+contexts = ["workspace"]
+command = ["sh", "bin/bridge-ctl.sh", "rules"]

@@ -1,0 +1,40 @@
+{
+  "socket_path": "",
+  "state_dir": "",
+  "notify_target": "",
+  "log_level": "info",
+  "defaults": {
+    "message": "herdr-bridge: {summary}",
+    "coalesce_ms": 1200,
+    "rate_limit_per_minute": 6,
+    "max_wait_target_ms": 600000,
+    "poll_interval_ms": 10000,
+    "reconnect_notice": true,
+    "notify_on_blocked": true
+  },
+  "rules": [
+    {
+      "name": "workers",
+      "watch": {
+        "kinds": ["codex", "claude", "grok", "cursor", "devin", "omp", "agy"],
+        "statuses": ["done", "idle", "blocked"]
+      },
+      "target": "w1:p1",
+      "message": "{summary}"
+    },
+    {
+      "name": "log-errors",
+      "watch": {
+        "output_match": {
+          "pane_id": "w1:p4",
+          "source": "recent_unwrapped",
+          "match": { "type": "regex", "value": "ERROR|Traceback" }
+        }
+      },
+      "target": "w1:p1",
+      "mode": "notify",
+      "message": "{summary}",
+      "rate_limit_per_minute": 3
+    }
+  ]
+}

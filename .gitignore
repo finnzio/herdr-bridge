@@ -1,0 +1,5 @@
+/bin/
+/dist/
+/herdr-bridge
+*.test
+coverage.out
