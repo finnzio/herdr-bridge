@@ -103,6 +103,10 @@ several landed together). On receiving it:
 3. Disarm finished rules (`herdr-bridge disarm --name <rule>`) so a later event
    cannot wake you for stale work, and re-arm for the next phase.
 
+The status in a wake message can read `done` or `idle`. Both mean the worker
+stopped working; `done` additionally means that pane has not been looked at
+yet.
+
 ## Inspecting the bridge
 
 ```bash
