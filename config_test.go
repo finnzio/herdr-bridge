@@ -233,6 +233,36 @@ func TestKnownStatePersistsAndPrunes(t *testing.T) {
 	}
 }
 
+func TestObserveTreatsViewingAFinishedPaneAsAcknowledgement(t *testing.T) {
+	dir := t.TempDir()
+	state := NewState(dir)
+	if changed, existed := state.Observe("w1:p2", "working", 1); changed || existed {
+		t.Errorf("first observation should be a silent baseline, got changed=%v existed=%v", changed, existed)
+	}
+	if changed, existed := state.Observe("w1:p2", "done", 2); !changed || !existed {
+		t.Errorf("completion should be a change, got changed=%v existed=%v", changed, existed)
+	}
+	// Viewing the finished pane rewrites "done" to "idle"; that is the same
+	// state, not a new completion.
+	if changed, existed := state.Observe("w1:p2", "idle", 3); changed || !existed {
+		t.Errorf("done to idle should not be a change, got changed=%v existed=%v", changed, existed)
+	}
+	if changed, existed := state.Observe("w1:p2", "working", 4); !changed || !existed {
+		t.Errorf("a new turn should be a change, got changed=%v existed=%v", changed, existed)
+	}
+	if changed, existed := state.Observe("w1:p2", "idle", 5); !changed || !existed {
+		t.Errorf("the next completion should be a change, got changed=%v existed=%v", changed, existed)
+	}
+	// A completion herdr reports as "done" after an idle pane is a new
+	// completion, not an acknowledgement.
+	if changed, existed := state.Observe("w1:p2", "working", 6); !changed || !existed {
+		t.Errorf("a new turn should be a change, got changed=%v existed=%v", changed, existed)
+	}
+	if changed, existed := state.Observe("w1:p2", "done", 7); !changed || !existed {
+		t.Errorf("a done completion should be a change, got changed=%v existed=%v", changed, existed)
+	}
+}
+
 func TestClientSurfacesAPIErrors(t *testing.T) {
 	fake := newFakeHerdr(t)
 	fake.setPanes(testPane("w1:p1"))

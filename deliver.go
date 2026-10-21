@@ -319,7 +319,7 @@ func (w *Waker) promptAgent(rule *Rule, target *resolvedTarget, text string, cfg
 		return fmt.Errorf("target pane %s hosts no recognized agent; use mode=type for raw terminals", target.PaneID)
 	}
 	switch target.Agent.AgentStatus {
-	case "blocked":
+	case statusBlocked:
 		msg := fmt.Sprintf("%s is waiting for interactive input; event not delivered (%s)", target.PaneID, text)
 		w.log.Warn("target blocked; delivery skipped", "target", target.PaneID, "rule", rule.Name)
 		if cfg.Defaults.NotifyOnBlocked != nil && *cfg.Defaults.NotifyOnBlocked {
@@ -328,13 +328,13 @@ func (w *Waker) promptAgent(rule *Rule, target *resolvedTarget, text string, cfg
 			}
 		}
 		return fmt.Errorf("target %s is blocked", target.PaneID)
-	case "working":
+	case statusWorking:
 		timeoutMS := defaultMaxWaitMS
 		if rule.MaxWaitTargetMS != nil {
 			timeoutMS = *rule.MaxWaitTargetMS
 		}
 		w.log.Info("target busy; waiting for it to settle", "target", target.PaneID, "timeout_ms", timeoutMS)
-		err := w.client.WaitAgent(target.PaneID, []string{"idle", "done", "blocked"}, timeoutMS)
+		err := w.client.WaitAgent(target.PaneID, []string{statusIdle, statusDone, statusBlocked}, timeoutMS)
 		fresh, rerr := w.resolve(rule.Target)
 		if rerr == nil {
 			target = fresh
@@ -342,7 +342,7 @@ func (w *Waker) promptAgent(rule *Rule, target *resolvedTarget, text string, cfg
 		if err != nil {
 			return fmt.Errorf("target did not settle before delivery: %w", err)
 		}
-		if target.Agent != nil && target.Agent.AgentStatus == "blocked" {
+		if target.Agent != nil && target.Agent.AgentStatus == statusBlocked {
 			return fmt.Errorf("target %s became blocked while waiting", target.PaneID)
 		}
 	}

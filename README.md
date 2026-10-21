@@ -193,13 +193,18 @@ hooks do not identify who requested a particular wait. That relationship is
 stored by `arm`. No changes to Herdr-managed hook scripts are needed.
 
 The default watched states are `done` and `blocked`: completion, or a worker
-that stopped and needs attention. `idle` is deliberately not watched — it also
-fires every time a worker settles between turns. Add it explicitly for agents
-that report completion that way:
+that stopped and needs attention.
+
+`done` and `idle` are the same status for the bridge. Herdr reports a worker
+that finished in a background tab as `done`, and rewrites it to `idle` once you
+visit that tab; a rule that watches either spelling matches both. A wake-up
+therefore never depends on the worker tab being active, and visiting a finished
+worker does not produce a second notification.
 
 ```bash
+# Completion and "needs attention", spelled out.
 herdr-bridge arm --name worker-finished --pane w1:p2 \
-  --status done --status blocked --status idle
+  --status done --status blocked
 ```
 
 `blocked` means the worker needs attention, not that it completed successfully.
@@ -379,6 +384,10 @@ Important limits:
   matching between runs.
 - **Rule lifetime:** rules persist until disarmed. Remove waits that have served
   their purpose to avoid stale notifications.
+- **Viewing a finished worker:** Herdr rewrites `done` to `idle` once you visit
+  the pane. The bridge reads that as an acknowledgement of the completion it
+  already reported, so visiting a finished worker does not wake the initiator
+  a second time.
 
 ## Portable packages and updates
 

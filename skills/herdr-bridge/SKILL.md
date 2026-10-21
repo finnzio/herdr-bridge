@@ -67,9 +67,10 @@ Selector flags: `--agent <name|glob>` (repeatable),
 `--pane-exited`.
 
 Use Herdr's `cursor` kind for Cursor's `agent` CLI and `omp` for Oh My Pi.
-The default statuses are `done` and `blocked`. `idle` also fires every time a
-worker settles between turns, so add `--status idle` explicitly only for
-agents such as OMP that report completion that way.
+The default statuses are `done` and `blocked`. `done` and `idle` are the same
+status: Herdr reports a worker that finished in a background tab as `done` and
+rewrites it to `idle` after you visit that tab, and the bridge matches both.
+A wake-up never depends on the worker tab being active.
 
 Delivery: `--mode prompt` (default, wakes an agent pane), `--mode type` (raw
 input into any pane), `--mode notify` (Herdr notification only). Tuning:

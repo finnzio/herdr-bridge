@@ -101,8 +101,19 @@ const (
 	defaultStatusesCSV = "done,blocked"
 )
 
+// Agent statuses the bridge understands. Herdr reports two spellings of "the
+// agent is back at its prompt": "done" while the completion has not been
+// viewed yet, and "idle" once it has.
+const (
+	statusDone    = "done"
+	statusIdle    = "idle"
+	statusWorking = "working"
+	statusBlocked = "blocked"
+	statusUnknown = "unknown"
+)
+
 var validStatuses = map[string]bool{
-	"done": true, "idle": true, "working": true, "blocked": true, "unknown": true,
+	statusDone: true, statusIdle: true, statusWorking: true, statusBlocked: true, statusUnknown: true,
 }
 
 // The socket API spells the read source "recent_unwrapped"; the CLI wrapper

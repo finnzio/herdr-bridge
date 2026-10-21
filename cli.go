@@ -487,7 +487,7 @@ func cmdArm(args []string) int {
 	fs.Var(&kinds, "kind", "watch agent kind, e.g. codex (repeatable)")
 	fs.Var(&panes, "pane", "watch exact pane id (repeatable)")
 	fs.Var(&workspaces, "workspace", "watch workspace id (repeatable)")
-	fs.Var(&statuses, "status", "watch agent status: done|blocked|idle|working|unknown (repeatable, default done,blocked)")
+	fs.Var(&statuses, "status", "watch agent status: done|idle|blocked|working|unknown (repeatable, default done,blocked); done and idle are the same status")
 	matchPane := fs.String("match-pane", "", "watch pane output on this pane id")
 	matchRe := fs.String("match-regex", "", "output match regex")
 	matchSub := fs.String("match-substring", "", "output match literal substring")

@@ -883,9 +883,13 @@ func globMatch(pattern, value string) bool {
 	return strings.HasSuffix(value, parts[len(parts)-1])
 }
 
+// statusAllowed reports whether a rule watches a status. "done" and "idle" are
+// the same status for the bridge, so a rule that watches either one matches
+// both.
 func statusAllowed(statuses []string, status string) bool {
+	want := statusClass(status)
 	for _, s := range statuses {
-		if s == status {
+		if statusClass(s) == want {
 			return true
 		}
 	}

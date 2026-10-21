@@ -107,6 +107,19 @@ func (s *State) LoadKnown() error {
 	return nil
 }
 
+// statusClass collapses Herdr's two spellings of "the agent is back at its
+// prompt". Herdr reports "done" while the completion is still unseen and
+// rewrites it to "idle" once the user visits the pane. Both mean the same
+// thing to the bridge: the worker stopped working. A wake-up must not depend
+// on the worker tab being active, so a rule that watches either spelling
+// matches both.
+func statusClass(status string) string {
+	if status == statusDone {
+		return statusIdle
+	}
+	return status
+}
+
 // Observe records a pane status. It reports whether this is a change against a
 // previously known state; the very first observation of a pane is a baseline
 // and never counts as a change.
@@ -115,6 +128,14 @@ func (s *State) Observe(paneID, status string, seq uint64) (changed bool, existe
 	defer s.mu.Unlock()
 	prev, ok := s.known[paneID]
 	if ok && prev.Status == status {
+		return false, true
+	}
+	if ok && prev.Status == statusDone && status == statusIdle {
+		// Herdr rewrites "done" to "idle" when the user visits the pane. That
+		// acknowledges the completion the bridge already reported; it is not a
+		// second completion, so it must not wake the initiator again.
+		s.known[paneID] = KnownEntry{Status: status, Seq: seq, At: time.Now()}
+		s.knownDirty = true
 		return false, true
 	}
 	s.known[paneID] = KnownEntry{Status: status, Seq: seq, At: time.Now()}

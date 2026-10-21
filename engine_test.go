@@ -215,13 +215,17 @@ func TestBaselineIsSilentAndRepeatedStatusIgnored(t *testing.T) {
 	}
 }
 
-func TestIdleIsNotWatchedByDefault(t *testing.T) {
+// Herdr spells a finished worker "done" while the completion is unseen and
+// "idle" once it has been viewed. Both mean the worker stopped, so the default
+// statuses must catch a completion no matter which tab the worker sits in.
+func TestDefaultWatchesCompletionInBothSpellings(t *testing.T) {
 	fake := newFakeHerdr(t)
 	fake.setAgents(
 		testAgent("w1:p2", "codex", "working", "worker"),
+		testAgent("w1:p3", "codex", "working", "worker-2"),
 		testAgent("w1:p1", "claude", "idle", "supervisor"),
 	)
-	fake.setPanes(testPane("w1:p1"), testPane("w1:p2"))
+	fake.setPanes(testPane("w1:p1"), testPane("w1:p2"), testPane("w1:p3"))
 	startEngine(t, fake, []map[string]any{{
 		"name":   "workers",
 		"watch":  map[string]any{"kinds": []string{"codex"}},
@@ -229,16 +233,15 @@ func TestIdleIsNotWatchedByDefault(t *testing.T) {
 	}}, nil)
 	waitForSubscribe(t, fake, 1)
 
+	// A worker in the active tab: herdr reports "idle".
 	fake.setAgentStatus("w1:p2", "idle")
 	fake.Push("pane.agent_status_changed", map[string]any{"pane_id": "w1:p2", "agent_status": "idle"})
-	time.Sleep(300 * time.Millisecond)
-	if n := fake.promptCount(); n != 0 {
-		t.Fatalf("idle transition produced %d prompt(s); want 0", n)
-	}
+	waitFor(t, 3*time.Second, "prompt on idle completion", func() bool { return fake.promptCount() == 1 })
 
-	fake.setAgentStatus("w1:p2", "blocked")
-	fake.Push("pane.agent_status_changed", map[string]any{"pane_id": "w1:p2", "agent_status": "blocked"})
-	waitFor(t, 3*time.Second, "prompt on blocked", func() bool { return fake.promptCount() == 1 })
+	// A worker in a background tab: herdr reports "done".
+	fake.setAgentStatus("w1:p3", "done")
+	fake.Push("pane.agent_status_changed", map[string]any{"pane_id": "w1:p3", "agent_status": "done"})
+	waitFor(t, 3*time.Second, "prompt on done completion", func() bool { return fake.promptCount() == 2 })
 }
 
 func TestCaughtUpStateChangeAfterRestart(t *testing.T) {
@@ -566,6 +569,95 @@ func TestSelfReferentialEventsAreDropped(t *testing.T) {
 	if !strings.Contains(h.log.String(), "self-referential") {
 		t.Errorf("expected a self-referential warning in the log")
 	}
+}
+
+// Herdr reports a worker that finishes in a background tab as "done" and only
+// rewrites it to "idle" once the user visits that tab. A rule that watches
+// "idle" must still wake the initiator when the worker finishes.
+func TestBackgroundCompletionWakesWithoutTabActivation(t *testing.T) {
+	fake := newFakeHerdr(t)
+	fake.setAgents(
+		testAgent("w1:p2", "agy", "working", "worker"),
+		testAgent("w1:p1", "claude", "idle", "supervisor"),
+	)
+	fake.setPanes(testPane("w1:p1"), testPane("w1:p2"))
+	startEngine(t, fake, []map[string]any{{
+		"name":    "workers",
+		"watch":   map[string]any{"panes": []string{"w1:p2"}, "statuses": []string{"idle", "blocked"}},
+		"target":  "w1:p1",
+		"message": "{summary}",
+	}}, nil)
+	waitForSubscribe(t, fake, 1)
+
+	// The worker finishes while its tab sits in the background.
+	fake.setAgentStatus("w1:p2", "done")
+	fake.Push("pane.agent_status_changed", map[string]any{
+		"pane_id": "w1:p2", "workspace_id": "w1", "agent_status": "done", "agent": "agy",
+	})
+	waitFor(t, 3*time.Second, "prompt on background completion", func() bool { return fake.promptCount() == 1 })
+
+	got := fake.promptsSnapshot()[0]
+	if got.Target != "w1:p1" {
+		t.Errorf("prompt target = %q, want w1:p1", got.Target)
+	}
+}
+
+// Visiting the finished pane rewrites "done" to "idle". That acknowledges the
+// completion the bridge already reported; it is not a second completion.
+func TestViewingCompletedPaneDoesNotWakeAgain(t *testing.T) {
+	fake := newFakeHerdr(t)
+	fake.setAgents(
+		testAgent("w1:p2", "agy", "working", "worker"),
+		testAgent("w1:p1", "claude", "idle", "supervisor"),
+	)
+	fake.setPanes(testPane("w1:p1"), testPane("w1:p2"))
+	startEngine(t, fake, []map[string]any{{
+		"name":    "workers",
+		"watch":   map[string]any{"panes": []string{"w1:p2"}, "statuses": []string{"idle", "blocked"}},
+		"target":  "w1:p1",
+		"message": "{summary}",
+	}}, nil)
+	waitForSubscribe(t, fake, 1)
+
+	fake.setAgentStatus("w1:p2", "done")
+	fake.Push("pane.agent_status_changed", map[string]any{
+		"pane_id": "w1:p2", "workspace_id": "w1", "agent_status": "done", "agent": "agy",
+	})
+	waitFor(t, 3*time.Second, "prompt on background completion", func() bool { return fake.promptCount() == 1 })
+
+	// The user activates the worker tab, so herdr now reports "idle".
+	fake.setAgentStatus("w1:p2", "idle")
+	fake.Push("pane.agent_status_changed", map[string]any{
+		"pane_id": "w1:p2", "workspace_id": "w1", "agent_status": "idle", "agent": "agy",
+	})
+	time.Sleep(500 * time.Millisecond)
+	if n := fake.promptCount(); n != 1 {
+		t.Fatalf("viewing the finished pane produced %d prompt(s); want 1", n)
+	}
+}
+
+// A worker in the active tab reports "idle" when it finishes; a rule that
+// watches "done" must still see that completion.
+func TestForegroundCompletionWakesRuleThatWatchesDone(t *testing.T) {
+	fake := newFakeHerdr(t)
+	fake.setAgents(
+		testAgent("w1:p2", "codex", "working", "worker"),
+		testAgent("w1:p1", "claude", "idle", "supervisor"),
+	)
+	fake.setPanes(testPane("w1:p1"), testPane("w1:p2"))
+	startEngine(t, fake, []map[string]any{{
+		"name":    "workers",
+		"watch":   map[string]any{"panes": []string{"w1:p2"}, "statuses": []string{"done", "blocked"}},
+		"target":  "w1:p1",
+		"message": "{summary}",
+	}}, nil)
+	waitForSubscribe(t, fake, 1)
+
+	fake.setAgentStatus("w1:p2", "idle")
+	fake.Push("pane.agent_status_changed", map[string]any{
+		"pane_id": "w1:p2", "workspace_id": "w1", "agent_status": "idle", "agent": "codex",
+	})
+	waitFor(t, 3*time.Second, "prompt on foreground completion", func() bool { return fake.promptCount() == 1 })
 }
 
 func TestResubscribesWhenTopologyChanges(t *testing.T) {
