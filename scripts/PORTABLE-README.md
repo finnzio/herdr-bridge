@@ -31,7 +31,7 @@ target besides a Unix socket-capable Linux (WSL2 is fine).
 
 Supported Herdr agent kinds: `codex`, `claude`, `grok`, `cursor` (Cursor's
 `agent` CLI), `devin`, `omp` (Oh My Pi), and `agy` (Antigravity CLI).
-The installer saves one skill copy under `~/.agents/skills/herdr-bridge`.
+The installer saves the `use-herdr` skill under `~/.agents/skills/use-herdr`.
 Codex, Grok, Cursor, Devin, and OMP read it directly. For Claude and AGY, it
 adds links from `~/.claude/skills` and `~/.gemini/config/skills` when those
 configuration roots exist. Rerunning the installer refreshes the shared copy.

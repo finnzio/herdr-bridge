@@ -24,7 +24,7 @@ echo "building linux/arm64"
 ( cd "$REPO_ROOT" && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
     go build -trimpath -ldflags "-s -w" -o "$STAGE/bin/herdr-bridge-linux-arm64" . )
 
-cp "$REPO_ROOT/skills/herdr-bridge/SKILL.md" "$STAGE/skill/SKILL.md"
+cp "$REPO_ROOT/skills/use-herdr/SKILL.md" "$STAGE/skill/SKILL.md"
 cp "$REPO_ROOT/plugin/herdr-plugin.toml" "$STAGE/plugin/herdr-plugin.toml"
 cp "$REPO_ROOT/plugin/bin/"*.sh "$STAGE/plugin/bin/"
 chmod +x "$STAGE/plugin/bin/"*.sh
