@@ -63,6 +63,48 @@ parent address; Codex workers must start with `--no-daemon`.
   separate from hc worker communication. Do not add duplicate completion
   watchers for its read-only progress terminal.
 
+#### Interactive slash commands such as /clear
+
+An Agent generally cannot execute an interactive slash command on itself
+from inside its current turn. For an authorized command on a specific
+target, use a separate ordinary shell or another Agent to operate that
+target. First inspect it with `hc get` / `hc read`: it must be idle at its
+input box, with no draft or confirmation dialog. Do not interrupt work,
+erase a draft, or answer a dialog just to make the command fit.
+
+**Ordinary shell:** a caller that is not an Agent terminal can send the
+literal text and Enter directly:
+
+```sh
+hc send t7 "/clear"
+```
+
+**Agent sending to another Agent:** `hc send` normally adds a source tag,
+such as `<hc from="t15">/clear</hc>`. The target receives a message rather
+than a bare slash command. Starting `bash` inside an Agent's shell tool
+does not turn that caller into an ordinary shell. For this command, send
+individual keys instead:
+
+```sh
+hc keys t7 / c l e a r enter
+```
+
+Remote terminals use the same key sequence with their full address:
+
+```sh
+hc keys vps/t7 / c l e a r enter
+```
+
+Replace the example address with the verified target and inspect the
+result afterward. `hc keys` sends keys without message wrapping; it is not
+a general exact-text interface for arbitrary punctuation or Unicode.
+
+In hc 0.1.20, `hc send --raw` is unavailable. The proposed fix in
+[PR #141](https://github.com/herdrdev/herdr-core/pull/141) was still open
+when checked; only use such a flag after the installed `hc send --help`
+documents support. See the [v0.1.20 commands](https://github.com/herdrdev/herdr-core/blob/v0.1.20/docs/commands.md)
+and [message-wrapping issue #97](https://github.com/herdrdev/herdr-core/issues/97).
+
 Continue with bridge commands only in the herdr-tui workflow below.
 
 ## herdr-tui bridge workflow
