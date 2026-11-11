@@ -40,20 +40,20 @@ esac
 # --- skill ------------------------------------------------------------------
 if [ "$INSTALL_SKILL" = 1 ]; then
   SKILL_SRC="$HERE/skill/SKILL.md"
-  SKILL_DEST="$HOME/.agents/skills/herdr-bridge/SKILL.md"
+  SKILL_DEST="$HOME/.agents/skills/use-herdr/SKILL.md"
   mkdir -p "$(dirname "$SKILL_DEST")"
   cp "$SKILL_SRC" "$SKILL_DEST"
-  echo "installed: ~/.agents/skills/herdr-bridge/SKILL.md"
+  echo "installed: ~/.agents/skills/use-herdr/SKILL.md"
   # Codex, Grok, Cursor, Devin, and OMP discover ~/.agents/skills directly.
   # Claude and AGY use their own global roots; link to the shared copy only.
   for agent_dir in "$HOME/.claude" "$HOME/.gemini/config"; do
     [ -d "$agent_dir" ] || continue
     mkdir -p "$agent_dir/skills"
-    link="$agent_dir/skills/herdr-bridge"
+    link="$agent_dir/skills/use-herdr"
     if [ -e "$link" ] || [ -L "$link" ]; then continue; fi
     case "$agent_dir" in
-      "$HOME/.claude") skill_target="../../.agents/skills/herdr-bridge" ;;
-      *) skill_target="../../../.agents/skills/herdr-bridge" ;;
+      "$HOME/.claude") skill_target="../../.agents/skills/use-herdr" ;;
+      *) skill_target="../../../.agents/skills/use-herdr" ;;
     esac
     if ln -s "$skill_target" "$link"; then
       echo "linked:  $link"

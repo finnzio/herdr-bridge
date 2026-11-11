@@ -1,11 +1,20 @@
 # herdr-bridge
 
-Event-driven notifications for [Herdr](https://herdr.dev) agents, with no model
+Event-driven notifications for [herdr-tui](https://herdr.dev) agents, with no model
 calls while waiting.
 
-Arm a wait from a Herdr pane. When a worker finishes, a pane exits, or a log
+Arm a wait from a herdr-tui pane. When a worker finishes, a pane exits, or a log
 pattern matches, the bridge notifies the pane that armed it. Codex, Claude,
 Grok, Cursor, Devin, Oh My Pi, and Antigravity CLI all use the same mechanism.
+
+For **herdr-core (`hc`)**, use `hc --skill` and native `hc send` / `hc wait`
+instead. A nonempty `HC_TERMINAL_ID` selects hc even if herdr-tui variables
+also exist. Do not start, arm, or check this bridge for hc coordination.
+Normal agent `done`/`idle` needs an explicit result message to the initiator;
+native parent notes cover blocked/error/exited children. Keep any existing
+bridge daemon available for herdr-tui sessions. The [use-herdr skill](skills/use-herdr/SKILL.md)
+defines environment selection and both workflows. Codex long tasks continue
+to use `codex-bg` where configured.
 
 ## Why this project exists
 
@@ -37,7 +46,7 @@ zero-token claim applies to waiting, not the work performed after a wake-up.
 
 | Requirement | Details |
 | --- | --- |
-| Herdr | 0.9+ with socket protocol 22 and a running session |
+| herdr-tui | 0.9+ with socket protocol 22 and a running session |
 | Platform | Linux, WSL2, or macOS with a Unix domain socket |
 | Go | 1.24+ to build from source; unnecessary for portable binaries |
 | Caller | Run `arm` inside a Herdr pane, or provide an explicit `--target` |
@@ -59,8 +68,8 @@ herdr-bridge version
 Ensure `~/.local/bin` is in `PATH`. Install the shared agent skill once:
 
 ```bash
-mkdir -p ~/.agents/skills/herdr-bridge
-cp skills/herdr-bridge/SKILL.md ~/.agents/skills/herdr-bridge/SKILL.md
+mkdir -p ~/.agents/skills/use-herdr
+cp skills/use-herdr/SKILL.md ~/.agents/skills/use-herdr/SKILL.md
 ```
 
 Codex, Grok, Cursor, Devin, and OMP discover `~/.agents/skills` directly. Claude
@@ -70,17 +79,17 @@ same shared copy, preserving any existing entries:
 ```bash
 mkdir -p ~/.claude/skills ~/.gemini/config/skills
 
-if [ ! -e ~/.claude/skills/herdr-bridge ] && [ ! -L ~/.claude/skills/herdr-bridge ]; then
-  ln -s ../../.agents/skills/herdr-bridge ~/.claude/skills/herdr-bridge
+if [ ! -e ~/.claude/skills/use-herdr ] && [ ! -L ~/.claude/skills/use-herdr ]; then
+  ln -s ../../.agents/skills/use-herdr ~/.claude/skills/use-herdr
 fi
 
-if [ ! -e ~/.gemini/config/skills/herdr-bridge ] && [ ! -L ~/.gemini/config/skills/herdr-bridge ]; then
-  ln -s ../../../.agents/skills/herdr-bridge ~/.gemini/config/skills/herdr-bridge
+if [ ! -e ~/.gemini/config/skills/use-herdr ] && [ ! -L ~/.gemini/config/skills/use-herdr ]; then
+  ln -s ../../../.agents/skills/use-herdr ~/.gemini/config/skills/use-herdr
 fi
 ```
 
 The skill teaches agents to register a wait, end their turn, inspect the result
-when notified, and remove finished rules. See [the skill](skills/herdr-bridge/SKILL.md).
+when notified, and remove finished rules. See [use-herdr](skills/use-herdr/SKILL.md).
 
 ## Quick start: notify the initiator
 
@@ -166,12 +175,12 @@ agent. Use Herdr's kind identifier when selecting workers:
 | Agent | `--kind` | Global skill discovery |
 | --- | --- | --- |
 | Codex | `codex` | `~/.agents/skills` directly |
-| Claude Code | `claude` | Link from `~/.claude/skills/herdr-bridge` |
+| Claude Code | `claude` | Link from `~/.claude/skills/use-herdr` |
 | Grok | `grok` | `~/.agents/skills` directly |
 | Cursor CLI (`agent`) | `cursor` | `~/.agents/skills` directly |
 | Devin | `devin` | `~/.agents/skills` directly |
 | Oh My Pi (`omp`) | `omp` | `~/.agents/skills` directly |
-| Antigravity CLI (`agy`) | `agy` | Link from `~/.gemini/config/skills/herdr-bridge` |
+| Antigravity CLI (`agy`) | `agy` | Link from `~/.gemini/config/skills/use-herdr` |
 
 Shared discovery is documented by [Codex](https://developers.openai.com/codex/skills),
 [Cursor](https://cursor.com/docs/skills), and [OMP](https://github.com/can1357/oh-my-pi/blob/main/docs/skills.md).
