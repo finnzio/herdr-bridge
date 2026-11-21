@@ -63,42 +63,100 @@ parent address; Codex workers must start with `--no-daemon`.
   separate from hc worker communication. Do not add duplicate completion
   watchers for its read-only progress terminal.
 
-#### Role-based on-demand orchestration (hc templates)
+#### Reuse workspace agents first; spawn only as fallback
 
-1. **Discover workspace agents first:** before dispatching, run `hc ls`,
-   `hc get <id>`, and `hc templates` to inventory idle terminals and role
-   templates in the current workspace (matching `cwd` / `herdr.space`). Reuse
-   idle agents belonging to the current workspace first; never hijack agents
-   working in other sessions or worktrees.
-2. **On-demand spawning & parallel-first execution:** keep only an
-   Orchestrator visible in a new workspace tab by default, and spawn needed
-   roles in the background via `hc` templates (`~/.config/herdr-core/templates/*.md`
-   — `orchestrator`, `frontend`, `backend`, `reviewer`, `executor`):
+1. **Always reuse existing workspace agents first:** before dispatching,
+   inspect your own context with `hc get "$HC_TERMINAL_ID" --json` (recording
+   your `cwd` and `labels["herdr.space"]`), then run `hc ls --json` and
+   `hc get <id> --json` to inventory live agents in the same workspace
+   (matching `herdr.space` or `cwd`).
+   - **Do not filter only for `status == "idle"`:** reusable workspace agents
+     may report `status: "idle"`, `status: "done"` (finished a previous turn
+     and awaiting assignment), or `status: null` with an interactive agent CLI
+     as `foreground.name` (e.g. `grok` inside a `zsh` tab). Before reusing a
+     `done` or `null` candidate, run `hc read --lines 30 <id>` to confirm it is
+     sitting at its prompt with no active work, unsent draft, or confirmation
+     dialog.
+   - Assign work to an available workspace agent via
+     `hc send <existing-id> "<task contract; report with hc send $HC_TERMINAL_ID>"`
+     (for an unrelated fresh task, confirm the prompt is clear and reset
+     context first with `hc keys <id> / c l e a r enter`).
+   - Never hijack terminals in other `herdr.space` tabs, sessions, or
+     worktrees, and never interrupt `working` or `blocked` terminals.
+2. **Spawn new workers only as fallback:** use `hc run --bg` only when the
+   current workspace has no existing agent suitable for the role, when all
+   matching workspace agents are `working` and additional parallelism is
+   justified, or when the user explicitly asks to launch new ones.
+   - Roles are decoupled from specific agent brands (templates provide
+     defaults and can be overridden with another CLI or model as needed).
+   - Once interfaces and non-overlapping file ownership are locked, parallelize
+     discovery, Frontend, Backend, incremental read-only cross-model
+     Reviewer, and Executor tasks (or multiple non-overlapping
+     instances/worktrees of the same role) to shorten the critical path. Keep
+     one writer per file per phase in a shared workspace; run local checks in
+     parallel and run full repo gates through a single coordinator or
+     Executor.
+3. **Avoid background `PATH` / `exit 127` launch failures:**
+   - **Why `exit 127` happens:** on Linux, `herdr-core serve` (when started
+     over SSH) snapshots a **non-interactive login shell** environment once at
+     startup and never reads `~/.zshrc` or `~/.bashrc`. `hc run <template>`
+     runs `command:` via `sh -c` under the core's `PATH` (not the caller's
+     interactive shell `PATH`), and `zsh -lc` also skips `~/.zshrc` (reading
+     only `~/.zshenv` and `~/.zprofile`).
+   - **Preferred (templates):** ensure `~/.config/herdr-core/templates/*.md`
+     source the user's POSIX CLI `PATH` setup before `exec <cli> <flags>`
+     (e.g., `. "$HOME/.config/herdr-core/env.sh" && exec codex --yolo --no-daemon`),
+     then launch with `hc templates` verified first:
 
 ```sh
 hc run --bg --name <role>-<slug> --parent "$HC_TERMINAL_ID" --cwd "$PWD" \
   <template> "<task contract; report with hc send $HC_TERMINAL_ID>"
 ```
 
-   Roles are decoupled from specific agent brands (templates provide defaults
-   and can be overridden with another CLI or model as needed). Once interfaces
-   and non-overlapping file ownership are locked, parallelize discovery,
-   Frontend, Backend, incremental read-only cross-model Reviewer, and Executor
-   tasks (or multiple non-overlapping instances/worktrees of the same role) to
-   shorten the critical path. Keep one writer per file per phase in a shared
-   workspace; run local checks in parallel and run full repo gates through a
-   single coordinator or Executor.
-3. **Unattended background launch flags:** to prevent background `hc run --bg`
+   - **Direct launch (without a template):** pass **both** your explicit
+     `PATH` via `env` **and** the resolved binary path. Never launch by bare
+     command name, never rely on `zsh -lc` alone, and never pass an absolute
+     CLI path without `PATH="$PATH"` (otherwise tools the worker runs — `hc`,
+     `node`, `pnpm` — still fail with `exit 127`):
+
+```sh
+hc run --bg --name <role>-<slug> --parent "$HC_TERMINAL_ID" --cwd "$PWD" -- \
+  env "PATH=$PATH" "$(command -v codex)" --yolo --no-daemon \
+  "<task contract; report with hc send $HC_TERMINAL_ID>"
+```
+
+   - **Persistent machine-level fix:** place user CLI `PATH` exports in
+     `~/.zprofile` (or a POSIX login snippet sourced there); the user can then
+     refresh an older running core from a shell **outside Herdr** via
+     `hc server restart --fresh` (never run `hc server stop/restart` from an
+     agent unless explicitly asked).
+   - After launching, check `first_message.sent` and `hc get <id>`. If a
+     worker exits with `127`, run `hc read <id>` to inspect the shell error and
+     fix `PATH` / template before relaunching — never retry blindly with
+     `zsh -lc`.
+4. **Unattended background launch flags:** to prevent background `hc run --bg`
    workers from stalling on interactive permission prompts, use:
    - Claude Code: `claude --dangerously-skip-permissions`
    - Codex: `codex --yolo --no-daemon` (always keep `--no-daemon` in `hc`)
    - Antigravity: `agy --dangerously-skip-permissions`
    - Grok: `grok --always-approve`
-4. **Window visibility & cleanup:** unlabeled `hc run --bg` workers stay
-   hidden in `herdr-app` to avoid tab clutter. To inspect or take over a
-   running worker in the window, surface it on demand (`herdr-app do terminal.keep`
-   or label it with `herdr.space=<id>` and optional `herdr.tab=<id>`). After
-   accepting deliverables, clean up only workers you started (`hc kill <t> && hc rm <t>`).
+5. **Window visibility & single-target cleanup:** unlabeled `hc run --bg`
+   workers stay hidden in `herdr-app` to avoid tab clutter. To inspect or take
+   over a running worker in the window, surface it on demand
+   (`herdr-app do terminal.keep` or label it with `herdr.space=<id>` and
+   optional `herdr.tab=<id>`).
+   - Only clean up workers you spawned — **never** `hc kill` or `hc rm`
+     pre-existing workspace agents you reused.
+   - **`hc kill <t>` and `hc rm <t>` accept only ONE terminal address per
+     invocation** (passing multiple IDs such as `hc rm t12c t12d` fails with
+     exit code 2 `unexpected argument`). Remove multiple workers one by one:
+
+```sh
+for t in <id1> <id2>; do
+  hc kill "$t" 2>/dev/null || true
+  hc rm "$t"
+done
+```
 
 #### Interactive slash commands such as /clear
 
