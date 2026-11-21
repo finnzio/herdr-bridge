@@ -63,6 +63,43 @@ parent address; Codex workers must start with `--no-daemon`.
   separate from hc worker communication. Do not add duplicate completion
   watchers for its read-only progress terminal.
 
+#### Role-based on-demand orchestration (hc templates)
+
+1. **Discover workspace agents first:** before dispatching, run `hc ls`,
+   `hc get <id>`, and `hc templates` to inventory idle terminals and role
+   templates in the current workspace (matching `cwd` / `herdr.space`). Reuse
+   idle agents belonging to the current workspace first; never hijack agents
+   working in other sessions or worktrees.
+2. **On-demand spawning & parallel-first execution:** keep only an
+   Orchestrator visible in a new workspace tab by default, and spawn needed
+   roles in the background via `hc` templates (`~/.config/herdr-core/templates/*.md`
+   — `orchestrator`, `frontend`, `backend`, `reviewer`, `executor`):
+
+```sh
+hc run --bg --name <role>-<slug> --parent "$HC_TERMINAL_ID" --cwd "$PWD" \
+  <template> "<task contract; report with hc send $HC_TERMINAL_ID>"
+```
+
+   Roles are decoupled from specific agent brands (templates provide defaults
+   and can be overridden with another CLI or model as needed). Once interfaces
+   and non-overlapping file ownership are locked, parallelize discovery,
+   Frontend, Backend, incremental read-only cross-model Reviewer, and Executor
+   tasks (or multiple non-overlapping instances/worktrees of the same role) to
+   shorten the critical path. Keep one writer per file per phase in a shared
+   workspace; run local checks in parallel and run full repo gates through a
+   single coordinator or Executor.
+3. **Unattended background launch flags:** to prevent background `hc run --bg`
+   workers from stalling on interactive permission prompts, use:
+   - Claude Code: `claude --dangerously-skip-permissions`
+   - Codex: `codex --yolo --no-daemon` (always keep `--no-daemon` in `hc`)
+   - Antigravity: `agy --dangerously-skip-permissions`
+   - Grok: `grok --always-approve`
+4. **Window visibility & cleanup:** unlabeled `hc run --bg` workers stay
+   hidden in `herdr-app` to avoid tab clutter. To inspect or take over a
+   running worker in the window, surface it on demand (`herdr-app do terminal.keep`
+   or label it with `herdr.space=<id>` and optional `herdr.tab=<id>`). After
+   accepting deliverables, clean up only workers you started (`hc kill <t> && hc rm <t>`).
+
 #### Interactive slash commands such as /clear
 
 An Agent generally cannot execute an interactive slash command on itself
